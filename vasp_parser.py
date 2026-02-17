@@ -1,4 +1,3 @@
-# vasp_parser.py
 import numpy as np
 from defusedxml import ElementTree
 import pandas as pd
@@ -10,54 +9,92 @@ class VaspParser:
         self.root = self.tree.getroot()
         self.atom_types = []
         self.symbols = []
+        self.counts = []
+        self.coordinate_type = "Direct" # Default assumption
         self._parse_atom_info()
 
     def _parse_atom_info(self):
-        """Parses atom types and counts to map indices to elements."""
+        """Parses atom types and counts."""
         atominfo = self.root.find('atominfo')
-        if atominfo is None:
-            raise ValueError("No <atominfo> found in XML.")
+        if atominfo is None: return
 
-        # Get atom counts per type
+        # Method 1: explicit atoms array
         atoms_array = atominfo.find(".//array[@name='atoms']/set")
-        if atoms_array is None:
-            # Fallback logic if specific array structure differs
-             pass
+        if atoms_array is not None:
+            self.symbols = []
+            for rc in atoms_array.findall('rc'):
+                cols = rc.findall('c')
+                element = cols[0].text.strip()
+                self.symbols.append(element)
 
-        # Extract atomic symbols and create a list matching the atoms
-        # This is a simplified extraction based on standard vasprun.xml structure
-        for rc in atoms_array.findall('rc'):
-            cols = rc.findall('c')
-            element = cols[0].text.strip()
-            self.symbols.append(element)
-            # Map element to a simple integer type for ML
-            if element not in self.atom_types:
-                self.atom_types.append(element)
+            # Deduce types and counts
+            unique_elements = []
+            for s in self.symbols:
+                if s not in unique_elements:
+                    unique_elements.append(s)
+            self.atom_types = unique_elements
+            self.counts = [self.symbols.count(e) for e in self.atom_types]
 
-    def get_atom_types_vector(self):
-        """Returns a numeric representation of atom types for ML."""
-        type_map = {sym: i for i, sym in enumerate(self.atom_types)}
-        return [type_map[s] for s in self.symbols]
+        else:
+            # Method 2: atomtypes array
+            types_array = atominfo.find(".//array[@name='atomtypes']/set")
+            if types_array:
+                for rc in types_array.findall('rc'):
+                    cols = rc.findall('c')
+                    count = int(cols[0].text.strip())
+                    element = cols[1].text.strip()
+                    self.atom_types.append(element)
+                    self.counts.append(count)
+                    self.symbols.extend([element] * count)
 
-    def extract_calculations(self):
-        """
-        Extracts positions and forces from all <calculation> steps.
-        Returns a list of dictionaries.
-        """
+    def extract_basis(self):
+        """Extracts the final lattice basis vectors."""
+        struct = self.root.findall('structure')[-1]
+        basis_node = struct.find(".//varray[@name='basis']")
+        if basis_node:
+            rows = []
+            for v in basis_node.findall('v'):
+                rows.append([float(x) for x in v.text.split()])
+            return np.array(rows)
+        return np.eye(3)
+
+    def extract_data(self):
+        """Extracts positions, forces, and stress."""
         data = []
 
-        # Iterate over all calculation blocks (ionic steps)
-        for calculation in self.root.findall('calculation'):
-            forces = self._extract_varray(calculation, 'forces')
-            positions = self._extract_varray(calculation, 'positions')
+        for i, calc in enumerate(self.root.findall('calculation')):
+            forces = self._extract_varray(calc, 'forces')
+            positions = self._extract_varray(calc, 'positions')
+            stress = self._extract_varray(calc, 'stress')
 
-            # Skip steps that might not have both (e.g., initial setup)
             if forces is not None and positions is not None:
-                df = pd.DataFrame(positions, columns=['x', 'y', 'z'])
-                df[['fx', 'fy', 'fz']] = forces
-                df['element'] = self.symbols
-                df['step'] = len(data)
-                data.append(df)
+                # Coordinate Type Check (Heuristic on first valid step)
+                if i == 0 or self.coordinate_type == "Direct":
+                    # If any coordinate is > 1.5, likely Cartesian (unless unit cell is tiny)
+                    if np.max(np.abs(positions)) > 1.5:
+                        self.coordinate_type = "Cartesian"
+                    else:
+                        self.coordinate_type = "Direct"
+
+                if len(positions) != len(self.symbols):
+                    # Skip mismatched steps
+                    continue
+
+                df_step = pd.DataFrame(positions, columns=['x', 'y', 'z'])
+                df_step[['fx', 'fy', 'fz']] = forces
+                df_step['element'] = self.symbols
+                df_step['step'] = i
+                df_step['file_source'] = self.filepath
+
+                if stress is not None:
+                    # Pressure in kB (approx mean of diagonal)
+                    pressure = -np.mean(np.diag(stress)) 
+                    df_step['pressure'] = pressure
+                    df_step['stress_xx'] = stress[0,0]
+                    df_step['stress_yy'] = stress[1,1]
+                    df_step['stress_zz'] = stress[2,2]
+
+                data.append(df_step)
 
         return pd.concat(data, ignore_index=True) if data else pd.DataFrame()
 
@@ -65,7 +102,6 @@ class VaspParser:
         """Helper to extract numpy array from <varray> tag."""
         varray = parent_node.find(f"./varray[@name='{name}']")
         if varray is None:
-            # Sometimes positions are inside a <structure> tag inside calculation
             struct = parent_node.find('structure')
             if struct:
                 varray = struct.find(f"./varray[@name='{name}']")
@@ -76,3 +112,4 @@ class VaspParser:
                 rows.append([float(x) for x in v.text.split()])
             return np.array(rows)
         return None
+

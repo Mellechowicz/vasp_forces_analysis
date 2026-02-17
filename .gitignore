@@ -205,3 +205,25 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# VASP
+*vasprun.xml*
+*CHG*
+*CHGCAR*
+*CONTCAR*
+*DOSCAR*
+*EIGENVAL*
+*IBZKPT*
+*INCAR*
+*KPOINTS*
+*OSZICAR*
+*OUTCAR*
+*PCDAT*
+*POSCAR*
+*POTCAR*
+*REPORT*
+*vaspout*.h5
+*vasprun*.xml
+*WAVECAR*
+*XDATCAR*
+
