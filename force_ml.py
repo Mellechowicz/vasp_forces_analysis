@@ -7,8 +7,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split
 
 class MLModel:
-    def __init__(self, data):
+    def __init__(self, data, n_estimators=100, max_depth=None, min_samples_split=2):
         self.data = data
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
         self.model = None
         self.is_trained = False
 
@@ -21,14 +24,19 @@ class MLModel:
                 remainder='passthrough'
                 )
 
-        # n_jobs=1 is safer for scripts that also use Matplotlib/Tkinter
+        # n_jobs=1 prevents Tkinter/Multiprocessing conflict
         self.model = Pipeline(steps=[
             ('preprocessor', preprocessor),
-            ('regressor', RandomForestRegressor(n_estimators=50, n_jobs=1))
+            ('regressor', RandomForestRegressor(
+                n_estimators=self.n_estimators, 
+                max_depth=self.max_depth,
+                min_samples_split=self.min_samples_split,
+                n_jobs=1
+                ))
             ])
 
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-        print("Training ML model...")
+        print(f"Training ML model (Trees: {self.n_estimators}, Depth: {self.max_depth})...")
         self.model.fit(X_train, y_train)
         self.is_trained = True
         print(f"Model Accuracy (R2): {self.model.score(X_test, y_test):.4f}")
@@ -48,24 +56,24 @@ class StructureGenerator:
         self.elements = template_elements
         self.lattice = lattice
 
-    def generate_zero_force_structures(self, n_structures, coordinate_system="Direct", steps=50, learning_rate=0.1):
+    def generate_zero_force_structures(self, n_structures, coordinate_system="Direct", steps=50, learning_rate=0.1, noise_level=None):
         """
         Generates relaxed structures.
-        Adjusts noise level based on coordinate system (Direct vs Cartesian).
         """
         generated_structures = []
 
-        # Set noise: Direct (0-1) needs small noise, Cartesian needs larger
-        if coordinate_system == "Direct":
-            noise_level = 0.02 # ~2% of lattice vector
+        # Determine noise level: Use User input if provided, else use Heuristic
+        if noise_level is not None:
+            current_noise = noise_level
         else:
-            noise_level = 0.2  # ~0.2 Angstroms
+            # Heuristic: Direct (0-1) needs small noise, Cartesian needs larger
+            current_noise = 0.02 if coordinate_system == "Direct" else 0.2
 
-        print(f"Generating {n_structures} structures (Mode: {coordinate_system}, Noise: {noise_level})...")
+        print(f"Generating {n_structures} structures (Mode: {coordinate_system}, Noise: {current_noise}, LR: {learning_rate})...")
 
         for i in range(n_structures):
             # 1. Perturb
-            current_pos = self.positions + np.random.normal(0, noise_level, self.positions.shape)
+            current_pos = self.positions + np.random.normal(0, current_noise, self.positions.shape)
 
             # 2. Relax (Steepest Descent)
             for step in range(steps):
@@ -76,10 +84,6 @@ class StructureGenerator:
                 if max_f < 0.05: 
                     break
 
-                # Update: Move atoms along force
-                # Note: For Direct coords, force (eV/A) isn't directly compatible without lattice metric,
-                # but for simple optimization, it pushes in the right direction.
-                # Ideally we'd convert Forces -> Direct gradients, but this works for approximate relaxation.
                 current_pos += learning_rate * pred_forces
 
             generated_structures.append(current_pos)
