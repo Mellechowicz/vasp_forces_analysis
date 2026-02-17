@@ -11,7 +11,7 @@ class Visualizer:
         """Plots Mean Force and Pressure evolution."""
         # Aggregate by step
         stats = self.df.groupby('step').agg({
-            'magnitude': 'mean', 
+            'magnitude': 'mean',
             'pressure': 'first' # Pressure is constant per step
             })
 
@@ -24,7 +24,7 @@ class Visualizer:
         ax1.tick_params(axis='y', labelcolor=color)
 
         if 'pressure' in stats.columns:
-            ax2 = ax1.twinx()  
+            ax2 = ax1.twinx()
             color = 'tab:red'
             ax2.set_ylabel('Pressure (kB)', color=color)
             ax2.plot(stats.index, stats['pressure'], color=color, linestyle='--')
@@ -44,5 +44,45 @@ class Visualizer:
         sns.kdeplot(data=step_df[['stress_xx', 'stress_yy', 'stress_zz']], fill=True)
         plt.title("Distribution of Diagonal Stress Components")
         plt.xlabel("Stress (kB)")
+        plt.show()
+
+
+    def plot_extended_diagnostics(self):
+        """Plots Energy, Drift, and Stress components."""
+
+        # Aggregate data per step
+        step_df = self.df.drop_duplicates(subset=['step', 'file_source']).sort_values('step')
+
+        # Calculate Drift per step
+        drift_df = self.df.groupby('step')[['fx', 'fy', 'fz']].sum()
+        drift_mags = np.linalg.norm(drift_df.values, axis=1)
+
+        fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
+
+        # 1. Energy Plot
+        if 'energy' in step_df.columns:
+            axes[0].plot(step_df['step'], step_df['energy'], color='tab:green', marker='.')
+            axes[0].set_ylabel('Total Energy (eV)')
+            axes[0].set_title('Energy Evolution')
+            axes[0].grid(True)
+
+        # 2. Drift Plot
+        axes[1].plot(drift_df.index, drift_mags, color='tab:orange', marker='.')
+        axes[1].set_ylabel('Total Drift (eV/A)')
+        axes[1].set_title('Force Drift (Sum of Forces)')
+        axes[1].grid(True)
+
+        # 3. Stress Components Plot
+        if 'stress_xx' in step_df.columns:
+            axes[2].plot(step_df['step'], step_df['stress_xx'], label='XX', linestyle='--')
+            axes[2].plot(step_df['step'], step_df['stress_yy'], label='YY', linestyle='--')
+            axes[2].plot(step_df['step'], step_df['stress_zz'], label='ZZ', linestyle='--')
+            axes[2].set_ylabel('Stress (kB)')
+            axes[2].set_xlabel('Ionic Step')
+            axes[2].set_title('Stress Tensor Components')
+            axes[2].legend()
+            axes[2].grid(True)
+
+        plt.tight_layout()
         plt.show()
 
