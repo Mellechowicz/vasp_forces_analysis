@@ -67,6 +67,14 @@ class VaspParser:
             positions = self._extract_varray(calc, 'positions')
             stress = self._extract_varray(calc, 'stress')
 
+            energy_val = None
+            energy_block = calc.find('energy')
+            if energy_block is not None:
+                # Prefer free energy (TOTEN)
+                e_node = energy_block.find("./i[@name='e_fr_energy']")
+                if e_node is not None:
+                    energy_val = float(e_node.text.strip())
+
             if forces is not None and positions is not None:
                 # Coordinate Type Check (Heuristic on first valid step)
                 if i == 0 or self.coordinate_type == "Direct":
@@ -85,10 +93,11 @@ class VaspParser:
                 df_step['element'] = self.symbols
                 df_step['step'] = i
                 df_step['file_source'] = self.filepath
+                df_step['energy'] = energy_val
 
                 if stress is not None:
                     # Pressure in kB (approx mean of diagonal)
-                    pressure = -np.mean(np.diag(stress)) 
+                    pressure = -np.mean(np.diag(stress))
                     df_step['pressure'] = pressure
                     df_step['stress_xx'] = stress[0,0]
                     df_step['stress_yy'] = stress[1,1]
