@@ -74,8 +74,18 @@ def main():
     # 4. Analysis Output
     print("\n--- Statistics ---")
     print(analyzer.force_stats())
+    print("\nDrift Stats (Sum of Forces):")
+        print(analyzer.drift_stats())
+
+    if 'energy' in combined_df.columns:
+        print("\nTotal Energy Stats:")
+        print(analyzer.energy_stats())
+
     if 'pressure' in combined_df.columns:
+        print("\nPressure Stats:")
         print(analyzer.pressure_stats())
+        print("\nStress Tensor Stats:")
+        print(analyzer.stress_stats())
 
     # 5. Machine Learning & Generation
     if args.ml or args.generate > 0:
@@ -83,9 +93,9 @@ def main():
 
         # Pass Hyperparameters from CLI
         ml = MLModel(
-                combined_df, 
-                n_estimators=args.n_estimators, 
-                max_depth=args.max_depth, 
+                combined_df,
+                n_estimators=args.n_estimators,
+                max_depth=args.max_depth,
                 min_samples_split=args.min_samples_split
                 )
         ml.train()
@@ -98,7 +108,7 @@ def main():
 
                 # Pass Generation Parameters from CLI
                 new_structs = gen.generate_zero_force_structures(
-                        args.generate, 
+                        args.generate,
                         coordinate_system=detected_coord_type,
                         steps=args.steps,
                         learning_rate=args.learning_rate,
@@ -111,11 +121,11 @@ def main():
                 for idx, pos in enumerate(new_structs):
                     fname = f"POSCAR_generated_{idx}.vasp"
                     PoscarWriter.write(
-                            fname, 
-                            last_lattice, 
-                            pos, 
-                            last_unique_elements, 
-                            last_counts, 
+                            fname,
+                            last_lattice,
+                            pos,
+                            last_unique_elements,
+                            last_counts,
                             coordinate_system=detected_coord_type,
                             title=f"ML_Gen_{idx}_{suffix}"
                             )
@@ -126,6 +136,7 @@ def main():
         viz = Visualizer(combined_df)
         viz.plot_trajectory()
         viz.plot_stress_distribution()
+        viz.plot_extended_diagnostics()
 
 if __name__ == "__main__":
     main()
