@@ -57,13 +57,19 @@ class Visualizer:
         drift_df = self.df.groupby('step')[['fx', 'fy', 'fz']].sum()
         drift_mags = np.linalg.norm(drift_df.values, axis=1)
 
+        # Get energy max/min for each step
+        step_stats = self.df.groupby('step')['energy'].agg(['min', 'max']).reset_index()
+
         fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
 
         # 1. Energy Plot
         if 'energy' in step_df.columns:
-            axes[0].plot(step_df['step'], step_df['energy'], color='tab:green', marker='.')
-            axes[0].set_ylabel('Total Energy (eV)')
+            axes[0].plot(step_stats['step'], step_stats['max'] - step_stats['max'][0], "-", color='tab:red', linewidth=5, marker='X', markersize=8, label='Rel. Max Energy')
+            axes[0].plot(step_stats['step'], step_stats['min'] - step_stats['min'][0], "-", color='tab:blue', linewidth=5, marker='X', markersize=8, label='Rel. Min Energy')
+            axes[0].plot(step_stats['step'], step_stats['max'] - step_stats['min'] - (step_stats['max'][0] - step_stats['min'][0]), "-", color='tab:green', linewidth=5, marker='X', markersize=8, label='Rel. Energy Range')
+            axes[0].set_ylabel('Energy (eV)')
             axes[0].set_title('Energy Evolution')
+            axes[0].legend()
             axes[0].grid(True)
 
         # 2. Drift Plot
@@ -74,9 +80,9 @@ class Visualizer:
 
         # 3. Stress Components Plot
         if 'stress_xx' in step_df.columns:
-            axes[2].plot(step_df['step'], step_df['stress_xx'], label='XX', linestyle='--')
-            axes[2].plot(step_df['step'], step_df['stress_yy'], label='YY', linestyle='--')
-            axes[2].plot(step_df['step'], step_df['stress_zz'], label='ZZ', linestyle='--')
+            axes[2].plot(step_df['step'], step_df['stress_xx'], 'o', label='XX')
+            axes[2].plot(step_df['step'], step_df['stress_yy'], 's', label='YY')
+            axes[2].plot(step_df['step'], step_df['stress_zz'], '^', label='ZZ')
             axes[2].set_ylabel('Stress (kB)')
             axes[2].set_xlabel('Ionic Step')
             axes[2].set_title('Stress Tensor Components')

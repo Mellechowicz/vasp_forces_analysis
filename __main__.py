@@ -75,7 +75,7 @@ def main():
     print("\n--- Statistics ---")
     print(analyzer.force_stats())
     print("\nDrift Stats (Sum of Forces):")
-        print(analyzer.drift_stats())
+    print(analyzer.drift_stats())
 
     if 'energy' in combined_df.columns:
         print("\nTotal Energy Stats:")
