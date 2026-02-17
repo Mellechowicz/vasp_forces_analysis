@@ -72,6 +72,7 @@ def main():
             sys.exit(0)
         else:
             print(f"Structure NOT Converged. Next ISIF: {suggested_isif}")
+            sys.exit(suggested_isif)
             # We don't force exit 1 here to allow viewing plots/ML, 
             # but in a bash script, you'd check stdout.
 
