@@ -19,7 +19,6 @@ def main():
     # 2. Load Data
     all_data = []
 
-    # Metadata placeholders
     last_lattice = None
     last_elements = None
     last_positions = None
@@ -35,7 +34,6 @@ def main():
             if not df.empty:
                 all_data.append(df)
 
-                # Update metadata (always from the latest file processed)
                 last_lattice = vp.extract_basis()
                 last_step_idx = df['step'].max()
                 last_step_df = df[df['step'] == last_step_idx]
@@ -57,24 +55,21 @@ def main():
     combined_df = pd.concat(all_data, ignore_index=True)
     analyzer = Analyzer(combined_df)
 
+    # Initialize suggested_isif to avoid naming errors if decision is skipped
+    suggested_isif = None
+
     # 3. Decision Module (Optional)
-    # Checks convergence and exits if requested
     if args.decision:
         print("\n--- Convergence Decision ---")
         decider = RelaxationDecision(analyzer, force_thresh=args.f_tol, pressure_thresh=args.p_tol)
         exit_code, suggested_isif = decider.evaluate()
 
-        # If user only wanted a decision check, we might want to exit here
-        # But usually we continue to ML/Plotting unless it's a pipeline script
-        # For this logic, we print suggestions. If strictly used in bash pipeline:
         if exit_code == 0:
             print("Structure Converged. Exiting 0.")
             sys.exit(0)
         else:
             print(f"Structure NOT Converged. Next ISIF: {suggested_isif}")
             sys.exit(suggested_isif)
-            # We don't force exit 1 here to allow viewing plots/ML, 
-            # but in a bash script, you'd check stdout.
 
     # 4. Analysis Output
     print("\n--- Statistics ---")
@@ -85,7 +80,14 @@ def main():
     # 5. Machine Learning & Generation
     if args.ml or args.generate > 0:
         print("\n--- Machine Learning ---")
-        ml = MLModel(combined_df)
+
+        # Pass Hyperparameters from CLI
+        ml = MLModel(
+                combined_df, 
+                n_estimators=args.n_estimators, 
+                max_depth=args.max_depth, 
+                min_samples_split=args.min_samples_split
+                )
         ml.train()
 
         if args.generate > 0:
@@ -93,10 +95,18 @@ def main():
                 print("Error: No template structure found.")
             else:
                 gen = StructureGenerator(ml, last_positions, last_elements, last_lattice)
+
+                # Pass Generation Parameters from CLI
                 new_structs = gen.generate_zero_force_structures(
                         args.generate, 
-                        coordinate_system=detected_coord_type
+                        coordinate_system=detected_coord_type,
+                        steps=args.steps,
+                        learning_rate=args.learning_rate,
+                        noise_level=args.noise_level
                         )
+
+                # Determine title suffix based on decision
+                suffix = f"ISIF_{suggested_isif}" if suggested_isif else "Optimized"
 
                 for idx, pos in enumerate(new_structs):
                     fname = f"POSCAR_generated_{idx}.vasp"
@@ -107,10 +117,10 @@ def main():
                             last_unique_elements, 
                             last_counts, 
                             coordinate_system=detected_coord_type,
-                            title=f"ML_Gen_{idx}_ISIF_{suggested_isif if args.decision and suggested_isif else 'Opt'}"
+                            title=f"ML_Gen_{idx}_{suffix}"
                             )
 
-    # 6. Visualization (Must be last to avoid blocking)
+    # 6. Visualization
     if args.plot:
         print("\n--- Visualizing ---")
         viz = Visualizer(combined_df)
@@ -119,3 +129,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

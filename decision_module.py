@@ -2,6 +2,10 @@ import sys
 import numpy as np
 
 class RelaxationDecision:
+    """
+    This class evaluates the convergence of a relaxation step and suggests the next ISIF setting.
+    It uses the force and pressure data from the Analyzer to make informed decisions.
+    """
     def __init__(self, analyzer, force_thresh=0.02, pressure_thresh=5.0):
         """
         analyzer: Instance of force_analysis.Analyzer
@@ -40,7 +44,8 @@ class RelaxationDecision:
 
         # Logic for next step if not converged
         # If forces are huge, stick to ion relaxation (ISIF=2)
-        # If forces are okay but pressure is high, relax cell (ISIF=3)
+        # If forces are okay but pressure is high, relax cell (ISIF=6)
+        # Otherwise, do a full relaxation (ISIF=3)
 
         suggested_isif = 3 # Default: Full relaxation
 
@@ -49,7 +54,10 @@ class RelaxationDecision:
             suggested_isif = 2
         elif forces_converged and not pressure_converged:
             # Forces good, only cell needs adjusting
-            suggested_isif = 3 
+            suggested_isif = 6
+        else:
+            # Just modify all
+            suggested_isif = 3
 
         print(f"NOT CONVERGED. Suggested next run: ISIF = {suggested_isif}")
         return 1, suggested_isif
