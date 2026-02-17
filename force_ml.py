@@ -1,88 +1,88 @@
-# force_ml.py
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
 
-class ForcePredictor:
-    def __init__(self, file_list):
-        """
-        Initializes the ML class.
-        file_list: List of paths to vasprun.xml files.
-        """
-        self.file_list = file_list
+class MLModel:
+    def __init__(self, data):
+        self.data = data
         self.model = None
-        self.data = None
-
-    def load_and_prepare_data(self):
-        from vasp_parser import VaspParser
-
-        all_data = []
-        print("Loading data for ML...")
-        for f in self.file_list:
-            try:
-                parser = VaspParser(f)
-                df = parser.extract_calculations()
-                all_data.append(df)
-            except Exception as e:
-                print(f"Skipping {f} due to error: {e}")
-
-        if not all_data:
-            raise ValueError("No data loaded for ML.")
-
-        self.data = pd.concat(all_data, ignore_index=True)
-        print(f"Loaded {len(self.data)} samples.")
+        self.is_trained = False
 
     def train(self):
-        if self.data is None:
-            self.load_and_prepare_data()
-
-        # Features: Position (x,y,z) + Element Type
         X = self.data[['x', 'y', 'z', 'element']]
-        # Targets: Forces (fx, fy, fz)
         y = self.data[['fx', 'fy', 'fz']]
 
-        # Preprocessing: OneHotEncode the 'element' column
         preprocessor = ColumnTransformer(
-                transformers=[
-                    ('cat', OneHotEncoder(), ['element'])
-                    ],
-                remainder='passthrough' # Keep x, y, z as numerical
+                transformers=[('cat', OneHotEncoder(handle_unknown='ignore'), ['element'])],
+                remainder='passthrough'
                 )
 
-        # Pipeline: Preprocess -> Random Forest
+        # n_jobs=1 is safer for scripts that also use Matplotlib/Tkinter
         self.model = Pipeline(steps=[
             ('preprocessor', preprocessor),
-            ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+            ('regressor', RandomForestRegressor(n_estimators=50, n_jobs=1))
             ])
 
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        print("Training Random Forest Regressor...")
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+        print("Training ML model...")
         self.model.fit(X_train, y_train)
+        self.is_trained = True
+        print(f"Model Accuracy (R2): {self.model.score(X_test, y_test):.4f}")
 
-        predictions = self.model.predict(X_test)
-        mse = mean_squared_error(y_test, predictions)
-        rmse = np.sqrt(mse)
-        r2 = r2_score(y_test, predictions)
+    def predict_forces(self, positions, elements):
+        if not self.is_trained:
+            raise Exception("Model not trained.")
 
-        print(f"Model Evaluation:\nRMSE: {rmse:.4f}\nR^2 Score: {r2:.4f}")
+        df = pd.DataFrame(positions, columns=['x', 'y', 'z'])
+        df['element'] = elements
+        return self.model.predict(df)
 
-        return X_test, y_test, predictions
+class StructureGenerator:
+    def __init__(self, ml_model, template_positions, template_elements, lattice):
+        self.ml_model = ml_model
+        self.positions = np.array(template_positions)
+        self.elements = template_elements
+        self.lattice = lattice
 
-    def predict(self, positions, elements):
+    def generate_zero_force_structures(self, n_structures, coordinate_system="Direct", steps=50, learning_rate=0.1):
         """
-        Predict forces for new inputs.
-        positions: list of [x, y, z] lists
-        elements: list of element strings corresponding to positions
+        Generates relaxed structures.
+        Adjusts noise level based on coordinate system (Direct vs Cartesian).
         """
-        if self.model is None:
-            raise Exception("Model not trained yet.")
+        generated_structures = []
 
-        input_df = pd.DataFrame(positions, columns=['x', 'y', 'z'])
-        input_df['element'] = elements
-        return self.model.predict(input_df)
+        # Set noise: Direct (0-1) needs small noise, Cartesian needs larger
+        if coordinate_system == "Direct":
+            noise_level = 0.02 # ~2% of lattice vector
+        else:
+            noise_level = 0.2  # ~0.2 Angstroms
+
+        print(f"Generating {n_structures} structures (Mode: {coordinate_system}, Noise: {noise_level})...")
+
+        for i in range(n_structures):
+            # 1. Perturb
+            current_pos = self.positions + np.random.normal(0, noise_level, self.positions.shape)
+
+            # 2. Relax (Steepest Descent)
+            for step in range(steps):
+                pred_forces = self.ml_model.predict_forces(current_pos, self.elements)
+
+                # Check convergence
+                max_f = np.max(np.linalg.norm(pred_forces, axis=1))
+                if max_f < 0.05: 
+                    break
+
+                # Update: Move atoms along force
+                # Note: For Direct coords, force (eV/A) isn't directly compatible without lattice metric,
+                # but for simple optimization, it pushes in the right direction.
+                # Ideally we'd convert Forces -> Direct gradients, but this works for approximate relaxation.
+                current_pos += learning_rate * pred_forces
+
+            generated_structures.append(current_pos)
+
+        return generated_structures
+

@@ -1,67 +1,102 @@
-# main.py
+import argparse
+import sys
+import pandas as pd
+import numpy as np
 from vasp_parser import VaspParser
-from force_analysis import ForceAnalyzer
-from visualizer import ForceVisualizer
-from force_ml import ForcePredictor
-import matplotlib.pyplot as plt
+from force_analysis import Analyzer
+from visualizer import Visualizer
+from force_ml import MLModel, StructureGenerator
+from poscar_io import PoscarWriter
 
 def main():
-    # 1. Parsing
-    filename = 'vasprun.xml' 
-    print(f"--- Parsing {filename} ---")
-    try:
-        parser = VaspParser(filename)
-        df = parser.extract_calculations()
-        print(f"Extracted {len(df)} atom-step entries.")
-    except Exception as e:
-        print(f"Error parsing file: {e}")
-        return
+    parser = argparse.ArgumentParser(description="VASP XML Analysis & ML Generation")
+    parser.add_argument('files', metavar='F', type=str, nargs='+', help='List of vasprun.xml files')
+    parser.add_argument('--generate', type=int, default=0, help='Number of zero-force cells to generate')
+    args = parser.parse_args()
 
-    if df.empty:
-        print("No force/position data found.")
-        return
+    all_data = []
 
-    # 2. Analysis
-    print("\n--- Statistical & Logical Analysis ---")
-    analyzer = ForceAnalyzer(df)
+    # Metadata from the last file loaded
+    last_lattice = None
+    last_elements = None
+    last_positions = None
+    last_counts = None
+    last_unique_elements = None
+    detected_coord_type = "Direct"
 
-    print("Basic Stats:")
-    print(analyzer.basic_stats())
+    print("--- Parsing Files ---")
+    for f in args.files:
+        try:
+            vp = VaspParser(f)
+            df = vp.extract_data()
+            if not df.empty:
+                all_data.append(df)
 
-    print("\nConvergence Check:")
-    print(analyzer.check_convergence())
+                # Store metadata for generation
+                last_lattice = vp.extract_basis()
+                last_step_idx = df['step'].max()
+                last_step_df = df[df['step'] == last_step_idx]
 
-    print("\nNormality Test (Shapiro-Wilk):")
-    print(analyzer.component_normality_test())
+                last_elements = last_step_df['element'].tolist()
+                last_positions = last_step_df[['x','y','z']].values
+                last_unique_elements = vp.atom_types
+                last_counts = vp.counts
+                detected_coord_type = vp.coordinate_type
 
-    print("\nStats by Atom Type:")
-    print(analyzer.atom_type_analysis())
+                print(f"Loaded {f}: {len(df)} atoms*steps (Coords: {vp.coordinate_type})")
+            else:
+                print(f"No valid data in {f}")
+        except Exception as e:
+            print(f"Error reading {f}: {e}")
 
-    # 3. Visualization
-    print("\n--- Generating Visualizations ---")
-    viz = ForceVisualizer(analyzer.df) # Use dataframe with magnitude column
+    if not all_data:
+        print("No valid data found.")
+        sys.exit(1)
 
-    viz.plot_trajectory_stats()
-    viz.plot_force_distribution()
-    viz.plot_3d_scatter()
-    # viz.plot_component_correlation() # Uncomment for larger matrix plot
+    combined_df = pd.concat(all_data, ignore_index=True)
 
-    # 4. Machine Learning
-    print("\n--- Machine Learning Pipeline ---")
-    # Using the same file as a 'list' for demonstration
-    ml = ForcePredictor([filename]) 
+    # --- Analysis ---
+    print("\n--- Analysis ---")
+    ana = Analyzer(combined_df)
+    print("Force Stats:\n", ana.force_stats())
+    if 'pressure' in combined_df.columns:
+        print("\nPressure Stats:\n", ana.pressure_stats())
 
-    X_test, y_test, preds = ml.train()
+    # --- ML Training & Generation ---
+    if args.generate > 0:
+        print("\n--- ML Training & Generation ---")
+        if last_positions is None:
+            print("Error: No template structure found.")
+        else:
+            ml = MLModel(combined_df)
+            ml.train()
 
-    # Visualize ML Results (Actual vs Predicted Fx)
-    plt.figure(figsize=(6,6))
-    plt.scatter(y_test.iloc[:, 0], preds[:, 0], alpha=0.5)
-    plt.plot([y_test.iloc[:, 0].min(), y_test.iloc[:, 0].max()], 
-             [y_test.iloc[:, 0].min(), y_test.iloc[:, 0].max()], 'r--')
-    plt.xlabel("Actual Fx")
-    plt.ylabel("Predicted Fx")
-    plt.title("ML Prediction Accuracy: Fx")
-    plt.show()
+            generator = StructureGenerator(ml, last_positions, last_elements, last_lattice)
+
+            # Pass detected coordinate type to generator
+            new_structs = generator.generate_zero_force_structures(
+                    args.generate, 
+                    coordinate_system=detected_coord_type
+                    )
+
+            for idx, pos in enumerate(new_structs):
+                fname = f"POSCAR_generated_{idx}.vasp"
+                PoscarWriter.write(
+                        fname, 
+                        last_lattice, 
+                        pos, 
+                        last_unique_elements, 
+                        last_counts, 
+                        coordinate_system=detected_coord_type,
+                        title=f"ML_Generated_{idx}_ForceOptimized"
+                        )
+
+    # --- Visualizing (Run Last) ---
+    print("\n--- Visualizing ---")
+    viz = Visualizer(combined_df)
+    viz.plot_trajectory()
+    viz.plot_stress_distribution()
 
 if __name__ == "__main__":
     main()
+
